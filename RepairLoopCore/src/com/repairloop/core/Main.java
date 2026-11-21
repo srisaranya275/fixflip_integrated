@@ -23,7 +23,7 @@ import java.util.List;
  */
 public class Main {
     public static void main(String[] args) {
-        printHeader("RepairLoopCore — Plain Java 21 Business Logic Demonstration");
+        printHeader("FixFlip — Plain Java 21 Business Logic Demonstration");
 
         // 1. Create a Repair Request
         System.out.println("\n1. CREATING REPAIR REQUEST");

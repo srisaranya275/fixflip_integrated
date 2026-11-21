@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,7 +33,7 @@ public class RepairLoopHttpServer {
                 exchange.sendResponseHeaders(204, -1);
                 return;
             }
-            sendJson(exchange, 200, "{\"status\":\"UP\",\"module\":\"RepairLoopCore\",\"javaVersion\":\""
+            sendJson(exchange, 200, "{\"status\":\"UP\",\"app\":\"FixFlip\",\"module\":\"RepairLoopCore\",\"javaVersion\":\""
                     + System.getProperty("java.version") + "\"}");
         });
 
@@ -58,7 +59,7 @@ public class RepairLoopHttpServer {
 
         server.setExecutor(null);
         server.start();
-        System.out.println("RepairLoopCore HTTP Server listening on http://localhost:" + port);
+        System.out.println("FixFlip Java 21 HTTP Server listening on http://localhost:" + port);
         System.out.println("  GET  /api/health");
         System.out.println("  POST /api/decision/evaluate");
     }
@@ -112,6 +113,7 @@ public class RepairLoopHttpServer {
         breakdownJson.append("}");
 
         return String.format(
+                Locale.ROOT,
                 "{\"engine\":\"Java21-RepairLoopCore\",\"repairScore\":%d,\"replacementScore\":%d,"
                         + "\"repairCostRatio\":%.2f,\"repairCostPercentage\":%.2f,\"estimatedSavings\":%.2f,"
                         + "\"additionalLifespanYears\":%.2f,\"recommendation\":\"%s\",\"explanation\":\"%s\","

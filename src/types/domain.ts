@@ -14,6 +14,7 @@ export type QuotationStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED';
 
 export type ListingCondition = 'LIKE_NEW' | 'GOOD' | 'FAIR' | 'FOR_PARTS';
 export type ListingStatus = 'AVAILABLE' | 'OFFER_RECEIVED' | 'SOLD';
+export type TransactionStatus = 'CONFIRMED' | 'PICKUP_SCHEDULED' | 'COMPLETED';
 export type OfferStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED';
 
 export type WarrantyHealth = 'ACTIVE' | 'EXPIRING_SOON' | 'EXPIRED';
@@ -111,6 +112,7 @@ export interface ResaleListing {
   buyerVendorName?: string | null;
   soldPrice?: number | null;
   soldAt?: Timestamp | null;
+  transactionStatus?: TransactionStatus | null;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 }

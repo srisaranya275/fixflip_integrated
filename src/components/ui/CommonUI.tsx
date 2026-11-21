@@ -28,6 +28,7 @@ export function StatusText({ status }: { status: string }) {
     upper === 'ACCEPTED' ||
     upper === 'ACTIVE' ||
     upper === 'SOLD' ||
+    upper === 'COMPLETED' ||
     upper === 'REPAIR'
   ) {
     colorClass = 'text-emerald-800 bg-emerald-50 border-emerald-200';
@@ -37,6 +38,8 @@ export function StatusText({ status }: { status: string }) {
     upper === 'QUOTATION_ACCEPTED' ||
     upper === 'QUOTATION_RECEIVED' ||
     upper === 'OFFER_RECEIVED' ||
+    upper === 'PICKUP_SCHEDULED' ||
+    upper === 'CONFIRMED' ||
     upper === 'EXPIRING_SOON'
   ) {
     colorClass = 'text-amber-800 bg-amber-50 border-amber-200';

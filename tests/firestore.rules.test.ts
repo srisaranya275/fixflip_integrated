@@ -1,5 +1,5 @@
 /**
- * RepairLoop Firestore Security Rules — Adversarial Dirty Dozen Payload Spec
+ * FixFlip Firestore Security Rules — Adversarial Dirty Dozen Payload Spec
  * Documents all 12 adversarial vectors verified against firestore.rules.
  */
 

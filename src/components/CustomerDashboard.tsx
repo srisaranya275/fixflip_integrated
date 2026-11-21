@@ -18,6 +18,7 @@ import {
   createWarranty,
   deleteWarranty,
   rejectVendorOffer,
+  updateResaleTransactionStatus,
 } from '../services/repairLoopService';
 import {
   ListingCondition,
@@ -32,6 +33,7 @@ import {
   calculateWarrantyStatus,
   compressImageToDataUrl,
   formatCurrency,
+  resolveAssetUrl,
 } from '../utils/warranty';
 import { DecisionEngineView } from './DecisionEngineView';
 import {
@@ -55,9 +57,9 @@ export type CustomerTab =
 
 const SAMPLE_PHOTOS = [
   { label: 'No preset photo', url: '' },
-  { label: 'Laptop Workstation', url: '/src/assets/images/product_laptop_workstation_1795228565379.jpg' },
-  { label: 'Espresso Appliance', url: '/src/assets/images/product_espresso_machine_1795228564966.jpg' },
-  { label: 'Studio Headphones', url: '/src/assets/images/product_headphones_audio_1795228565036.jpg' },
+  { label: 'Laptop Workstation', url: resolveAssetUrl('/src/assets/images/product_laptop_workstation_1795228565379.jpg') },
+  { label: 'Espresso Appliance', url: resolveAssetUrl('/src/assets/images/product_espresso_machine_1795228564966.jpg') },
+  { label: 'Studio Headphones', url: resolveAssetUrl('/src/assets/images/product_headphones_audio_1795228565036.jpg') },
 ];
 
 interface CustomerDashboardProps {
@@ -257,7 +259,7 @@ export function CustomerDashboard({
         description: '',
         imageUrl: '',
       }));
-      setSuccessMsg('Product listed on the RepairLoop Resale Marketplace.');
+      setSuccessMsg('Product listed on the FixFlip Resale Marketplace.');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to list product.');
     } finally {
@@ -665,7 +667,7 @@ export function CustomerDashboard({
                     Or Use Reference Photo
                   </label>
                   <select
-                    value={reqForm.imageUrl.startsWith('/src/') ? reqForm.imageUrl : ''}
+                    value={SAMPLE_PHOTOS.some((p) => p.url === reqForm.imageUrl) ? reqForm.imageUrl : ''}
                     onChange={(e) => setReqForm({ ...reqForm, imageUrl: e.target.value })}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
                   >
@@ -714,7 +716,7 @@ export function CustomerDashboard({
                   <div className="flex flex-col sm:flex-row gap-5">
                     {req.imageUrl && (
                       <img
-                        src={req.imageUrl}
+                        src={resolveAssetUrl(req.imageUrl)}
                         alt={req.productName}
                         referrerPolicy="no-referrer"
                         className="w-full sm:w-32 h-24 object-cover rounded-lg border border-slate-200 shrink-0"
@@ -1329,7 +1331,7 @@ export function CustomerDashboard({
                     Reference Photo
                   </label>
                   <select
-                    value={resaleForm.imageUrl.startsWith('/src/') ? resaleForm.imageUrl : ''}
+                    value={SAMPLE_PHOTOS.some((p) => p.url === resaleForm.imageUrl) ? resaleForm.imageUrl : ''}
                     onChange={(e) => setResaleForm({ ...resaleForm, imageUrl: e.target.value })}
                     className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg"
                   >
@@ -1410,7 +1412,7 @@ export function CustomerDashboard({
                       <div className="flex flex-col sm:flex-row gap-5">
                         {lst.imageUrl && (
                           <img
-                            src={lst.imageUrl}
+                            src={resolveAssetUrl(lst.imageUrl)}
                             alt={lst.productName}
                             referrerPolicy="no-referrer"
                             className="w-full sm:w-36 h-28 object-cover rounded-lg border border-slate-200 shrink-0"
@@ -1430,17 +1432,79 @@ export function CustomerDashboard({
                         </div>
                       </div>
 
-                      <div className="text-left md:text-right shrink-0">
-                        <p className="text-xs text-slate-500">
-                          {lst.status === 'SOLD' ? 'Final Sale Price' : 'Expected Price'}
-                        </p>
-                        <p className="text-xl font-bold font-mono tabular-nums text-[#0F1E36]">
-                          {formatCurrency(lst.status === 'SOLD' ? lst.soldPrice : lst.expectedPrice)}
-                        </p>
-                        {lst.status === 'SOLD' && lst.buyerVendorName && (
-                          <p className="mt-1 text-xs font-medium text-emerald-700">
-                            Purchased by {lst.buyerVendorName}
+                      <div className="text-left md:text-right shrink-0 space-y-2">
+                        <div>
+                          <p className="text-xs text-slate-500">
+                            {lst.status === 'SOLD' ? 'Final Sale Price' : 'Expected Price'}
                           </p>
+                          <p className="text-xl font-bold font-mono tabular-nums text-[#0F1E36]">
+                            {formatCurrency(lst.status === 'SOLD' ? lst.soldPrice : lst.expectedPrice)}
+                          </p>
+                        </div>
+                        {lst.status === 'SOLD' && lst.buyerVendorName && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-medium text-emerald-700">
+                              Purchased by {lst.buyerVendorName}
+                            </p>
+                            <div className="flex flex-wrap items-center md:justify-end gap-2">
+                              <span className="text-[11px] font-medium text-slate-500">
+                                Fulfillment:
+                              </span>
+                              <StatusText status={lst.transactionStatus || 'CONFIRMED'} />
+                            </div>
+                            {(!lst.transactionStatus || lst.transactionStatus === 'CONFIRMED') && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmState({
+                                    open: true,
+                                    title: 'Schedule Resale Pickup',
+                                    message: `Mark pickup scheduled with ${lst.buyerVendorName} for ${lst.productName} (${lst.listingCode})?`,
+                                    confirmLabel: 'Schedule Pickup',
+                                    action: async () => {
+                                      await updateResaleTransactionStatus({
+                                        listing: lst,
+                                        nextStatus: 'PICKUP_SCHEDULED',
+                                        actorRole: 'CUSTOMER',
+                                      });
+                                      setSuccessMsg(
+                                        `Pickup scheduled for ${lst.listingCode}.`
+                                      );
+                                    },
+                                  })
+                                }
+                                className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0F1E36] rounded-lg hover:bg-slate-800 whitespace-nowrap"
+                              >
+                                Schedule Pickup
+                              </button>
+                            )}
+                            {lst.transactionStatus === 'PICKUP_SCHEDULED' && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmState({
+                                    open: true,
+                                    title: 'Complete Resale Handover',
+                                    message: `Confirm handoff and payment completion with ${lst.buyerVendorName} for ${lst.productName}?`,
+                                    confirmLabel: 'Mark Completed',
+                                    action: async () => {
+                                      await updateResaleTransactionStatus({
+                                        listing: lst,
+                                        nextStatus: 'COMPLETED',
+                                        actorRole: 'CUSTOMER',
+                                      });
+                                      setSuccessMsg(
+                                        `Transaction completed for ${lst.listingCode}.`
+                                      );
+                                    },
+                                  })
+                                }
+                                className="px-3 py-1.5 text-xs font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 whitespace-nowrap"
+                              >
+                                Mark Completed
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1559,7 +1623,29 @@ export function CustomerDashboard({
         </div>
       )}
 
-      {activeTab === 'decision' && <DecisionEngineView requests={requests} />}
+      {activeTab === 'decision' && (
+        <DecisionEngineView
+          requests={requests}
+          onSellDevice={(req) => {
+            if (req) {
+              setResaleForm((prev) => ({
+                ...prev,
+                productName: req.productName,
+                category: req.category,
+                brand: req.brand,
+                model: req.modelNumber,
+                ageYears: req.productAgeYears,
+                expectedPrice: Math.max(50, Math.round(req.replacementPrice * 0.3)),
+                location: req.location || profile.location || '',
+                description: `Selling ${req.brand} ${req.productName} (${req.modelNumber}). Prior issue: ${req.problemDescription}`,
+                imageUrl: req.imageUrl || prev.imageUrl,
+              }));
+            }
+            onTabChange('resale');
+            setShowResaleForm(true);
+          }}
+        />
+      )}
 
       <ConfirmModal
         open={Boolean(confirmState?.open)}

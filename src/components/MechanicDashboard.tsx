@@ -1,8 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { CheckCircle2, Play, Wrench } from 'lucide-react';
-import { advanceRepairStatus, submitQuotation } from '../services/repairLoopService';
+import { CheckCircle2, Pencil, Play, Wrench } from 'lucide-react';
+import {
+  advanceRepairStatus,
+  submitQuotation,
+  updateQuotation,
+} from '../services/repairLoopService';
 import { Quotation, RepairRequest, UserProfile } from '../types/domain';
-import { formatCurrency } from '../utils/warranty';
+import { formatCurrency, resolveAssetUrl } from '../utils/warranty';
 import {
   ConfirmModal,
   EmptyState,
@@ -40,6 +44,7 @@ export function MechanicDashboard({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<RepairRequest | null>(null);
+  const [editingQuotation, setEditingQuotation] = useState<Quotation | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const [quoteForm, setQuoteForm] = useState({
@@ -60,10 +65,15 @@ export function MechanicDashboard({
   } | null>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
-  const myQuotedRequestIds = useMemo(
-    () => new Set(myQuotations.map((q) => q.requestId)),
-    [myQuotations]
-  );
+  const myQuotationByRequestId = useMemo(() => {
+    const map = new Map<string, Quotation>();
+    for (const q of myQuotations) {
+      if (!map.has(q.requestId)) {
+        map.set(q.requestId, q);
+      }
+    }
+    return map;
+  }, [myQuotations]);
 
   const stats = useMemo(() => {
     const openCount = openRequests.length;
@@ -76,9 +86,37 @@ export function MechanicDashboard({
     return { openCount, submittedCount, acceptedCount, inProgressCount, completedCount };
   }, [openRequests, myQuotations, assignedRequests]);
 
+  const resetQuoteForm = () => {
+    setSelectedRequest(null);
+    setEditingQuotation(null);
+    setQuoteForm({
+      estimatedCost: 180,
+      spareParts: '',
+      completionTimeDays: 3,
+      additionalLifespanYears: 3,
+      repairDescription: '',
+      notes: '',
+    });
+  };
+
+  const startEditQuotation = (quote: Quotation) => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setSelectedRequest(null);
+    setEditingQuotation(quote);
+    setQuoteForm({
+      estimatedCost: quote.estimatedCost,
+      spareParts: quote.spareParts,
+      completionTimeDays: quote.completionTimeDays,
+      additionalLifespanYears: quote.additionalLifespanYears,
+      repairDescription: quote.repairDescription,
+      notes: quote.notes || '',
+    });
+  };
+
   const handleSubmitQuote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRequest) return;
+    if (!selectedRequest && !editingQuotation) return;
     setErrorMsg(null);
     setSuccessMsg(null);
     if (quoteForm.spareParts.trim().length < 2 || quoteForm.repairDescription.trim().length < 5) {
@@ -87,24 +125,24 @@ export function MechanicDashboard({
     }
     setSubmitting(true);
     try {
-      await submitQuotation({
-        request: selectedRequest,
-        mechanicId: profile.uid,
-        mechanicName: profile.fullName,
-        ...quoteForm,
-      });
-      setSuccessMsg(`Confidential quotation submitted for ${selectedRequest.requestCode}.`);
-      setSelectedRequest(null);
-      setQuoteForm({
-        estimatedCost: 180,
-        spareParts: '',
-        completionTimeDays: 3,
-        additionalLifespanYears: 3,
-        repairDescription: '',
-        notes: '',
-      });
+      if (editingQuotation) {
+        await updateQuotation({
+          quotationId: editingQuotation.id,
+          ...quoteForm,
+        });
+        setSuccessMsg(`Updated quotation for ${editingQuotation.requestCode}.`);
+      } else if (selectedRequest) {
+        await submitQuotation({
+          request: selectedRequest,
+          mechanicId: profile.uid,
+          mechanicName: profile.fullName,
+          ...quoteForm,
+        });
+        setSuccessMsg(`Confidential quotation submitted for ${selectedRequest.requestCode}.`);
+      }
+      resetQuoteForm();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to submit quotation.');
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to save quotation.');
     } finally {
       setSubmitting(false);
     }
@@ -234,7 +272,7 @@ export function MechanicDashboard({
             </p>
           </div>
 
-          {selectedRequest && (
+          {(selectedRequest || editingQuotation) && (
             <form
               onSubmit={handleSubmitQuote}
               className="bg-white border border-teal-500 rounded-xl p-6 space-y-4 shadow-sm"
@@ -242,13 +280,17 @@ export function MechanicDashboard({
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
                   <h3 className="text-base font-bold text-[#0F1E36]">
-                    Submit Quotation for {selectedRequest.productName}
+                    {editingQuotation
+                      ? `Edit Quotation for ${editingQuotation.productName}`
+                      : `Submit Quotation for ${selectedRequest?.productName}`}
                   </h3>
-                  <p className="text-xs text-slate-500 font-mono">{selectedRequest.requestCode}</p>
+                  <p className="text-xs text-slate-500 font-mono">
+                    {editingQuotation ? editingQuotation.requestCode : selectedRequest?.requestCode}
+                  </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedRequest(null)}
+                  onClick={resetQuoteForm}
                   className="text-xs font-medium text-slate-500 hover:text-slate-900"
                 >
                   Close
@@ -355,7 +397,7 @@ export function MechanicDashboard({
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => setSelectedRequest(null)}
+                  onClick={resetQuoteForm}
                   className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg"
                 >
                   Cancel
@@ -365,7 +407,11 @@ export function MechanicDashboard({
                   disabled={submitting}
                   className="px-5 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
                 >
-                  {submitting ? 'Submitting...' : 'Submit Confidential Quote'}
+                  {submitting
+                    ? 'Saving...'
+                    : editingQuotation
+                      ? 'Save Quote Changes'
+                      : 'Submit Confidential Quote'}
                 </button>
               </div>
             </form>
@@ -379,7 +425,7 @@ export function MechanicDashboard({
           ) : (
             <div className="space-y-4">
               {openRequests.map((req) => {
-                const alreadyQuoted = myQuotedRequestIds.has(req.id);
+                const existingQuote = myQuotationByRequestId.get(req.id);
                 return (
                   <div
                     key={req.id}
@@ -388,7 +434,7 @@ export function MechanicDashboard({
                     <div className="flex flex-col sm:flex-row gap-5">
                       {req.imageUrl && (
                         <img
-                          src={req.imageUrl}
+                          src={resolveAssetUrl(req.imageUrl)}
                           alt={req.productName}
                           referrerPolicy="no-referrer"
                           className="w-full sm:w-32 h-24 object-cover rounded-lg border border-slate-200 shrink-0"
@@ -419,15 +465,30 @@ export function MechanicDashboard({
                       </div>
                     </div>
 
-                    <div className="flex items-center lg:items-end justify-end shrink-0">
-                      {alreadyQuoted ? (
-                        <span className="text-xs font-semibold text-teal-700 bg-teal-50 border border-teal-200 px-3 py-1.5 rounded-lg">
-                          Quote Submitted
-                        </span>
+                    <div className="flex items-center lg:items-end justify-end gap-2 shrink-0">
+                      {existingQuote ? (
+                        <>
+                          <span className="text-xs font-semibold text-teal-700 bg-teal-50 border border-teal-200 px-3 py-1.5 rounded-lg">
+                            Quote Submitted
+                          </span>
+                          {existingQuote.status === 'PENDING' && (
+                            <button
+                              type="button"
+                              onClick={() => startEditQuotation(existingQuote)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#0F1E36] bg-white border border-slate-200 rounded-lg hover:bg-slate-50 whitespace-nowrap"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span>Edit Quote</span>
+                            </button>
+                          )}
+                        </>
                       ) : (
                         <button
                           type="button"
-                          onClick={() => setSelectedRequest(req)}
+                          onClick={() => {
+                            setEditingQuotation(null);
+                            setSelectedRequest(req);
+                          }}
                           className="px-4 py-2 text-xs font-semibold text-white bg-[#0F1E36] rounded-lg hover:bg-slate-800 whitespace-nowrap"
                         >
                           Submit Quotation
@@ -452,6 +513,141 @@ export function MechanicDashboard({
             </p>
           </div>
 
+          {editingQuotation && (
+            <form
+              onSubmit={handleSubmitQuote}
+              className="bg-white border border-teal-500 rounded-xl p-6 space-y-4 shadow-sm"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div>
+                  <h3 className="text-base font-bold text-[#0F1E36]">
+                    Edit Quotation for {editingQuotation.productName}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-mono">{editingQuotation.requestCode}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetQuoteForm}
+                  className="text-xs font-medium text-slate-500 hover:text-slate-900"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Estimated Repair Cost ($) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    required
+                    value={quoteForm.estimatedCost}
+                    onChange={(e) =>
+                      setQuoteForm({ ...quoteForm, estimatedCost: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Completion Time (Days) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    required
+                    value={quoteForm.completionTimeDays}
+                    onChange={(e) =>
+                      setQuoteForm({ ...quoteForm, completionTimeDays: Number(e.target.value) })
+                    }
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Est. Additional Lifespan (Yrs) *
+                  </label>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={30}
+                    step="0.5"
+                    required
+                    value={quoteForm.additionalLifespanYears}
+                    onChange={(e) =>
+                      setQuoteForm({
+                        ...quoteForm,
+                        additionalLifespanYears: Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Spare Parts Required *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={quoteForm.spareParts}
+                    onChange={(e) => setQuoteForm({ ...quoteForm, spareParts: e.target.value })}
+                    placeholder="e.g. OEM Battery + Power IC"
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Repair Description *
+                  </label>
+                  <textarea
+                    rows={2}
+                    required
+                    value={quoteForm.repairDescription}
+                    onChange={(e) =>
+                      setQuoteForm({ ...quoteForm, repairDescription: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Notes / Workmanship Warranty (Optional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={quoteForm.notes}
+                    onChange={(e) => setQuoteForm({ ...quoteForm, notes: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={resetQuoteForm}
+                  className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-5 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
+                >
+                  {submitting ? 'Saving...' : 'Save Quote Changes'}
+                </button>
+              </div>
+            </form>
+          )}
+
           {myQuotations.length === 0 ? (
             <EmptyState
               title="No quotations submitted yet"
@@ -471,6 +667,7 @@ export function MechanicDashboard({
                       <th className="py-3 px-5 text-right">Turnaround</th>
                       <th className="py-3 px-5 text-right">+Lifespan</th>
                       <th className="py-3 px-5">Status</th>
+                      <th className="py-3 px-5 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
@@ -494,6 +691,20 @@ export function MechanicDashboard({
                         </td>
                         <td className="py-3.5 px-5">
                           <StatusText status={q.status} />
+                        </td>
+                        <td className="py-3.5 px-5 text-right">
+                          {q.status === 'PENDING' ? (
+                            <button
+                              type="button"
+                              onClick={() => startEditQuotation(q)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-[#0F1E36] bg-white border border-slate-200 rounded-md hover:bg-slate-50"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>Edit</span>
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}

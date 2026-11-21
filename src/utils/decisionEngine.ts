@@ -80,17 +80,38 @@ export function evaluateRepairDecisionLocal(input: DecisionInput): DecisionResul
   };
 }
 
+export const JAVA_API_BASE_URL: string =
+  (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_JAVA_API_URL ||
+  'http://localhost:8080';
+
+export async function checkJavaBridgeHealth(
+  baseUrl = JAVA_API_BASE_URL
+): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 900);
+    const res = await fetch(`${baseUrl}/api/health`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Attempts to evaluate via a locally running RepairLoopHttpServer (Java 21)
+ * Attempts to evaluate via a locally running Java 21 HTTP server
  * and transparently indicates whether Java 21 or the browser fallback was used.
  */
 export async function evaluateViaJavaHttpBridge(
   input: DecisionInput,
-  baseUrl = 'http://localhost:8080'
+  baseUrl = JAVA_API_BASE_URL
 ): Promise<{ result: DecisionResult; bridgeConnected: boolean; bridgeError?: string }> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1800);
+    const timer = setTimeout(() => controller.abort(), 1400);
     const res = await fetch(`${baseUrl}/api/decision/evaluate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -99,20 +120,28 @@ export async function evaluateViaJavaHttpBridge(
     });
     clearTimeout(timer);
 
+    if (res.status >= 400 && res.status < 500) {
+      const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(errBody?.error || `Java server rejected inputs (HTTP ${res.status}).`);
+    }
     if (!res.ok) {
       throw new Error(`Java HTTP server returned ${res.status}`);
     }
     const data = (await res.json()) as DecisionResult;
     return { result: data, bridgeConnected: true };
   } catch (err) {
+    const isValidationError =
+      err instanceof Error &&
+      (err.message.includes('rejected inputs') ||
+        err.message.includes('Original price') ||
+        err.message.includes('cannot be negative'));
     const fallback = evaluateRepairDecisionLocal(input);
     return {
       result: fallback,
       bridgeConnected: false,
-      bridgeError:
-        err instanceof Error
-          ? `Local Java 21 HTTP server not reachable (${err.message}). Evaluated with local browser logic.`
-          : 'Local Java 21 HTTP server not reachable. Evaluated with local browser logic.',
+      bridgeError: isValidationError
+        ? `${err.message} Showing local estimate.`
+        : `Java 21 HTTP server not reachable at ${baseUrl}. Evaluated using local browser fallback logic.`,
     };
   }
 }

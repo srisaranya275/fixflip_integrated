@@ -1,6 +1,6 @@
-# RepairLoop — Repair. Reuse. Renew.
+# FixFlip — Repair. Reuse. Renew.
 
-**RepairLoop** is a full-stack electronics and household appliance repair, warranty registry, resale marketplace, and Repair-vs-Replace decision platform.
+**FixFlip** is a full-stack electronics and household appliance repair, warranty registry, resale marketplace, and Repair-vs-Replace decision platform.
 
 ---
 
@@ -65,4 +65,4 @@ cd RepairLoopCore
 java -cp out com.repairloop.core.server.RepairLoopHttpServer 8080
 ```
 
-Then open the **Decision Engine** tab in the RepairLoop web app and click **Try Java HTTP Bridge**. When the local Java server is not running (such as in cloud preview), the web app transparently evaluates using its mirrored TypeScript engine.
+Then open the **Decision Engine** tab in the FixFlip web app to evaluate live via the Java 21 HTTP bridge. When the local Java server is not running (such as in cloud preview), the web app transparently evaluates using its mirrored TypeScript fallback engine.

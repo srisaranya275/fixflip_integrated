@@ -183,7 +183,7 @@ service cloud.firestore {
           'brand', 'model', 'ageYears', 'condition', 'expectedPrice',
           'location', 'description', 'imageUrl', 'status', 'offerCount',
           'acceptedOfferId', 'buyerVendorId', 'buyerVendorName',
-          'soldPrice', 'soldAt', 'createdAt', 'updatedAt'
+          'soldPrice', 'soldAt', 'transactionStatus', 'createdAt', 'updatedAt'
         ])
         && isNonEmptyString(data.listingCode, 4, 32)
         && isValidId(data.sellerId)
@@ -205,6 +205,7 @@ service cloud.firestore {
         && (!('buyerVendorName' in data) || data.buyerVendorName == null || isNonEmptyString(data.buyerVendorName, 2, 80))
         && (!('soldPrice' in data) || data.soldPrice == null || (data.soldPrice is number && data.soldPrice > 0 && data.soldPrice <= 1000000))
         && (!('soldAt' in data) || data.soldAt == null || data.soldAt is timestamp)
+        && (!('transactionStatus' in data) || data.transactionStatus == null || data.transactionStatus in ['CONFIRMED', 'PICKUP_SCHEDULED', 'COMPLETED'])
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -372,14 +373,33 @@ service cloud.firestore {
         && isValidId(quotationId)
         && isValidQuotation(incoming())
         && existing().status == 'PENDING'
-        && existing().customerId == request.auth.uid
         && incoming().requestId == existing().requestId
+        && incoming().requestCode == existing().requestCode
+        && incoming().productName == existing().productName
         && incoming().customerId == existing().customerId
         && incoming().mechanicId == existing().mechanicId
+        && incoming().mechanicName == existing().mechanicName
         && incoming().createdAt == existing().createdAt
-        && incoming().status in ['ACCEPTED', 'REJECTED']
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+        && (
+          // Action 1: Customer accepts or rejects a pending quotation
+          (
+            existing().customerId == request.auth.uid
+            && incoming().status in ['ACCEPTED', 'REJECTED']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+          // Action 2: Submitting mechanic updates their own pending quotation while request is open
+          || (
+            isMechanicRole()
+            && existing().mechanicId == request.auth.uid
+            && incoming().status == 'PENDING'
+            && get(/databases/$(database)/documents/repairRequests/$(existing().requestId)).data.status in ['PENDING', 'QUOTATION_RECEIVED']
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'estimatedCost', 'spareParts', 'completionTimeDays',
+              'additionalLifespanYears', 'repairDescription', 'notes', 'updatedAt'
+            ])
+          )
+        );
       allow delete: if false;
     }
 
@@ -429,23 +449,24 @@ service cloud.firestore {
       allow update: if isVerified()
         && isValidId(listingId)
         && isValidResaleListing(incoming())
-        && existing().status != 'SOLD'
         && incoming().listingCode == existing().listingCode
         && incoming().sellerId == existing().sellerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          // Action 1: Vendor submits offer
+          // Action 1: Vendor submits offer on open listing
           (
-            isVendorRole()
+            existing().status != 'SOLD'
+            && isVendorRole()
             && existing().status in ['AVAILABLE', 'OFFER_RECEIVED']
             && incoming().status == 'OFFER_RECEIVED'
             && incoming().offerCount == existing().offerCount + 1
             && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'offerCount', 'updatedAt'])
           )
-          // Action 2: Seller accepts one vendor offer -> marks SOLD
+          // Action 2: Seller accepts one vendor offer -> marks SOLD (terminal sale lock)
           || (
-            existing().sellerId == request.auth.uid
+            existing().status != 'SOLD'
+            && existing().sellerId == request.auth.uid
             && existing().status in ['AVAILABLE', 'OFFER_RECEIVED']
             && incoming().status == 'SOLD'
             && incoming().acceptedOfferId is string
@@ -453,10 +474,30 @@ service cloud.firestore {
             && incoming().buyerVendorName is string
             && incoming().soldPrice is number
             && incoming().soldAt == request.time
+            && incoming().transactionStatus == 'CONFIRMED'
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'status', 'acceptedOfferId', 'buyerVendorId',
-              'buyerVendorName', 'soldPrice', 'soldAt', 'updatedAt'
+              'buyerVendorName', 'soldPrice', 'soldAt', 'transactionStatus', 'updatedAt'
             ])
+          )
+          // Action 3: Buyer vendor or seller advances post-sale transaction fulfillment status
+          || (
+            existing().status == 'SOLD'
+            && incoming().status == 'SOLD'
+            && incoming().acceptedOfferId == existing().acceptedOfferId
+            && incoming().buyerVendorId == existing().buyerVendorId
+            && incoming().buyerVendorName == existing().buyerVendorName
+            && incoming().soldPrice == existing().soldPrice
+            && incoming().soldAt == existing().soldAt
+            && (
+              (isVendorRole() && existing().buyerVendorId == request.auth.uid)
+              || existing().sellerId == request.auth.uid
+            )
+            && (
+              ((!('transactionStatus' in existing()) || existing().transactionStatus == 'CONFIRMED') && incoming().transactionStatus == 'PICKUP_SCHEDULED')
+              || (existing().transactionStatus == 'PICKUP_SCHEDULED' && incoming().transactionStatus == 'COMPLETED')
+            )
+            && incoming().diff(existing()).affectedKeys().hasOnly(['transactionStatus', 'updatedAt'])
           )
         );
       allow delete: if false;

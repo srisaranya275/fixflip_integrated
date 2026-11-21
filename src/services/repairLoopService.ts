@@ -20,6 +20,7 @@ import {
   RepairRequest,
   RepairStatus,
   ResaleListing,
+  TransactionStatus,
   UserProfile,
   UserRole,
   VendorOffer,
@@ -64,7 +65,7 @@ export async function createUserProfile(params: {
   try {
     const payload: Record<string, unknown> = {
       uid: params.uid,
-      fullName: clip(params.fullName, 80) || 'RepairLoop Member',
+      fullName: clip(params.fullName, 80) || 'FixFlip Member',
       email: clip(params.email, 120),
       role: params.role,
       createdAt: serverTimestamp(),
@@ -78,6 +79,28 @@ export async function createUserProfile(params: {
     return created.data() as UserProfile;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
+  }
+}
+
+export async function updateUserProfile(
+  uid: string,
+  params: { fullName: string; location?: string }
+): Promise<UserProfile> {
+  const path = `users/${uid}`;
+  const cleanName = clip(params.fullName, 80);
+  if (cleanName.length < 2) {
+    throw new Error('Full name must be at least 2 characters.');
+  }
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      fullName: cleanName,
+      location: clip(params.location || '', 120),
+      updatedAt: serverTimestamp(),
+    });
+    const updated = await getDoc(doc(db, 'users', uid));
+    return updated.data() as UserProfile;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
   }
 }
 
@@ -291,6 +314,31 @@ export async function submitQuotation(params: {
     return quoteRef.id;
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, path);
+  }
+}
+
+export async function updateQuotation(params: {
+  quotationId: string;
+  estimatedCost: number;
+  spareParts: string;
+  completionTimeDays: number;
+  additionalLifespanYears: number;
+  repairDescription: string;
+  notes?: string;
+}): Promise<void> {
+  const path = `quotations/${params.quotationId}`;
+  try {
+    await updateDoc(doc(db, 'quotations', params.quotationId), {
+      estimatedCost: Math.max(1, Math.min(1000000, Number(params.estimatedCost))),
+      spareParts: clip(params.spareParts, 300),
+      completionTimeDays: Math.max(1, Math.min(365, Math.round(Number(params.completionTimeDays)))),
+      additionalLifespanYears: Math.max(0.5, Math.min(30, Number(params.additionalLifespanYears))),
+      repairDescription: clip(params.repairDescription, 1000),
+      notes: clip(params.notes || '', 600),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
   }
 }
 
@@ -555,6 +603,7 @@ export async function acceptVendorOffer(params: {
       buyerVendorName: clip(params.selectedOffer.vendorName, 80),
       soldPrice: params.selectedOffer.offeredPrice,
       soldAt: serverTimestamp(),
+      transactionStatus: 'CONFIRMED' as TransactionStatus,
       updatedAt: serverTimestamp(),
     });
 
@@ -568,6 +617,46 @@ export async function acceptVendorOffer(params: {
       read: false,
       createdAt: serverTimestamp(),
     });
+
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, path);
+  }
+}
+
+export async function updateResaleTransactionStatus(params: {
+  listing: ResaleListing;
+  nextStatus: 'PICKUP_SCHEDULED' | 'COMPLETED';
+  actorRole: 'VENDOR' | 'CUSTOMER';
+}): Promise<void> {
+  const path = `resaleListings/${params.listing.id}`;
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'resaleListings', params.listing.id), {
+      transactionStatus: params.nextStatus,
+      updatedAt: serverTimestamp(),
+    });
+
+    const recipientId =
+      params.actorRole === 'VENDOR' ? params.listing.sellerId : params.listing.buyerVendorId;
+    if (recipientId) {
+      const notifRef = doc(collection(db, 'notifications'));
+      batch.set(notifRef, {
+        recipientId,
+        title:
+          params.nextStatus === 'PICKUP_SCHEDULED'
+            ? `Pickup Scheduled (${params.listing.listingCode})`
+            : `Transaction Completed (${params.listing.listingCode})`,
+        message:
+          params.nextStatus === 'PICKUP_SCHEDULED'
+            ? `Pickup has been scheduled for ${params.listing.productName}.`
+            : `The resale transaction for ${params.listing.productName} has been marked completed.`,
+        relatedType: 'RESALE_LISTING',
+        relatedId: params.listing.id,
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    }
 
     await batch.commit();
   } catch (err) {

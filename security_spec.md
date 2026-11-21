@@ -1,4 +1,4 @@
-# RepairLoop Security Specification (Phase 0)
+# FixFlip Security Specification (Phase 0)
 
 ## 1. Data Invariants
 1. **Identity & Role Integrity**: A `UserProfile` at `/users/{userId}` can only be read/created/updated by `userId == request.auth.uid`, never listed globally (`allow list: if false`), and `role` is restricted to `CUSTOMER`, `MECHANIC`, or `VENDOR` and is strictly immutable after creation.

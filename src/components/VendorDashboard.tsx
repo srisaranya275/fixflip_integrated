@@ -1,9 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { CheckCircle2, Recycle, ShoppingBag } from 'lucide-react';
-import { submitVendorOffer } from '../services/repairLoopService';
-import { ResaleListing, UserProfile, VendorOffer } from '../types/domain';
-import { formatCurrency } from '../utils/warranty';
 import {
+  submitVendorOffer,
+  updateResaleTransactionStatus,
+} from '../services/repairLoopService';
+import { ResaleListing, UserProfile, VendorOffer } from '../types/domain';
+import { formatCurrency, resolveAssetUrl } from '../utils/warranty';
+import {
+  ConfirmModal,
   EmptyState,
   ErrorBanner,
   LoadingSkeleton,
@@ -44,6 +48,14 @@ export function VendorDashboard({
     offeredPrice: 300,
     message: '',
   });
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    action: () => Promise<void>;
+  } | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   const myOfferedListingIds = useMemo(
     () => new Set(myOffers.map((o) => o.listingId)),
@@ -295,7 +307,7 @@ export function VendorDashboard({
                     <div className="space-y-3">
                       {item.imageUrl && (
                         <img
-                          src={item.imageUrl}
+                          src={resolveAssetUrl(item.imageUrl)}
                           alt={item.productName}
                           referrerPolicy="no-referrer"
                           className="w-full h-44 object-cover rounded-lg border border-slate-200"
@@ -454,11 +466,67 @@ export function VendorDashboard({
                     {item.brand} {item.model} · {item.condition.replace(/_/g, ' ')} ·{' '}
                     {item.location}
                   </p>
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <span className="text-slate-500">Seller: {item.sellerName}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-500">Fulfillment:</span>
+                      <StatusText status={item.transactionStatus || 'CONFIRMED'} />
+                    </div>
+                  </div>
+                  <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
                     <span className="font-mono tabular-nums font-bold text-emerald-700 text-sm">
                       Purchased: {formatCurrency(item.soldPrice)}
                     </span>
+                    <div className="flex items-center gap-2">
+                      {(!item.transactionStatus || item.transactionStatus === 'CONFIRMED') && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmState({
+                              open: true,
+                              title: 'Schedule Pickup',
+                              message: `Notify ${item.sellerName} that pickup is scheduled for ${item.productName} (${item.listingCode})?`,
+                              confirmLabel: 'Schedule Pickup',
+                              action: async () => {
+                                await updateResaleTransactionStatus({
+                                  listing: item,
+                                  nextStatus: 'PICKUP_SCHEDULED',
+                                  actorRole: 'VENDOR',
+                                });
+                                setSuccessMsg(`Pickup scheduled for ${item.listingCode}.`);
+                              },
+                            })
+                          }
+                          className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0F1E36] rounded-lg hover:bg-slate-800 whitespace-nowrap"
+                        >
+                          Schedule Pickup
+                        </button>
+                      )}
+                      {item.transactionStatus === 'PICKUP_SCHEDULED' && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmState({
+                              open: true,
+                              title: 'Mark Transaction Completed',
+                              message: `Confirm device collection and settlement completed with ${item.sellerName} for ${item.productName}?`,
+                              confirmLabel: 'Mark Completed',
+                              action: async () => {
+                                await updateResaleTransactionStatus({
+                                  listing: item,
+                                  nextStatus: 'COMPLETED',
+                                  actorRole: 'VENDOR',
+                                });
+                                setSuccessMsg(`Acquisition ${item.listingCode} marked completed.`);
+                              },
+                            })
+                          }
+                          className="px-3 py-1.5 text-xs font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 whitespace-nowrap"
+                        >
+                          Mark Completed
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -466,6 +534,29 @@ export function VendorDashboard({
           )}
         </div>
       )}
+
+      <ConfirmModal
+        open={Boolean(confirmState?.open)}
+        title={confirmState?.title || ''}
+        message={confirmState?.message || ''}
+        confirmLabel={confirmState?.confirmLabel}
+        loading={confirmLoading}
+        onConfirm={async () => {
+          if (!confirmState) return;
+          setConfirmLoading(true);
+          setErrorMsg(null);
+          try {
+            await confirmState.action();
+            setConfirmState(null);
+          } catch (err) {
+            setErrorMsg(err instanceof Error ? err.message : 'Status update failed.');
+            setConfirmState(null);
+          } finally {
+            setConfirmLoading(false);
+          }
+        }}
+        onCancel={() => setConfirmState(null)}
+      />
     </div>
   );
 }

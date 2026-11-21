@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Calculator, Cpu, Info, RefreshCw } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowRight, Calculator, Cpu, Info, RefreshCw } from 'lucide-react';
 import { DecisionInput, DecisionResult, RepairRequest } from '../types/domain';
 import { evaluateRepairDecisionLocal, evaluateViaJavaHttpBridge } from '../utils/decisionEngine';
 import { formatCurrency } from '../utils/warranty';
@@ -7,9 +7,10 @@ import { StatusText } from './ui/CommonUI';
 
 interface DecisionEngineViewProps {
   requests?: RepairRequest[];
+  onSellDevice?: (request?: RepairRequest) => void;
 }
 
-export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
+export function DecisionEngineView({ requests = [], onSellDevice }: DecisionEngineViewProps) {
   const [input, setInput] = useState<DecisionInput>({
     originalPrice: 1250,
     productAgeYears: 3,
@@ -21,40 +22,56 @@ export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
     recurringFault: false,
   });
 
-  const [useJavaBridge, setUseJavaBridge] = useState(false);
+  const [selectedRequestId, setSelectedRequestId] = useState<string>('');
+  const [useJavaBridge, setUseJavaBridge] = useState(true);
   const [bridgeStatus, setBridgeStatus] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [result, setResult] = useState<DecisionResult>(() => evaluateRepairDecisionLocal(input));
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runEvaluation = async (nextInput: DecisionInput, bridgeEnabled: boolean) => {
     if (!bridgeEnabled) {
       setResult(evaluateRepairDecisionLocal(nextInput));
-      setBridgeStatus(null);
+      setBridgeStatus('Using local FixFlip browser calculation mode.');
       return;
     }
     setEvaluating(true);
     const response = await evaluateViaJavaHttpBridge(nextInput);
     setResult(response.result);
     if (response.bridgeConnected) {
-      setBridgeStatus('Connected to local Java 21 RepairLoopHttpServer at http://localhost:8080.');
+      setBridgeStatus('Connected to local FixFlip Java 21 Decision Service (RepairDecisionEngine.java).');
     } else {
       setBridgeStatus(
         response.bridgeError ||
-          'Local Java 21 server unavailable; computed with mirrored browser logic.'
+          'Local Java 21 server unavailable; evaluated with mirrored FixFlip browser logic.'
       );
     }
     setEvaluating(false);
   };
 
+  useEffect(() => {
+    void runEvaluation(input, true);
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+    // Initial auto-probe of Java 21 bridge on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleFieldChange = <K extends keyof DecisionInput>(key: K, value: DecisionInput[K]) => {
     const next = { ...input, [key]: value };
     setInput(next);
-    if (!useJavaBridge) {
-      setResult(evaluateRepairDecisionLocal(next));
+    setResult(evaluateRepairDecisionLocal(next));
+    if (useJavaBridge) {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = setTimeout(() => {
+        void runEvaluation(next, true);
+      }, 350);
     }
   };
 
   const handleLoadFromRequest = (requestId: string) => {
+    setSelectedRequestId(requestId);
     const req = requests.find((r) => r.id === requestId);
     if (!req) return;
     const next: DecisionInput = {
@@ -71,6 +88,8 @@ export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
     void runEvaluation(next, useJavaBridge);
   };
 
+  const selectedRequest = requests.find((r) => r.id === selectedRequestId);
+
   const factorRows = [
     { label: 'Repair-to-Replacement Cost Ratio', score: result.factorBreakdown.costRatioPoints, max: 35 },
     { label: 'Expected Additional Lifespan', score: result.factorBreakdown.lifespanPoints, max: 25 },
@@ -85,7 +104,7 @@ export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
         <div>
           <h2 className="text-2xl font-bold text-[#0F1E36]">Repair-vs-Replace Decision Engine</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Transparent 100-point weighted evaluation aligned with RepairDecisionEngine.java.
+            Transparent 100-point weighted evaluation aligned with FixFlip&apos;s Java 21 decision service.
           </p>
         </div>
 
@@ -93,7 +112,7 @@ export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
           {requests.length > 0 && (
             <select
               aria-label="Load parameters from repair request"
-              defaultValue=""
+              value={selectedRequestId}
               onChange={(e) => handleLoadFromRequest(e.target.value)}
               className="px-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-lg text-slate-700"
             >
@@ -121,13 +140,13 @@ export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
               Active Engine:{' '}
               <span className="font-mono text-teal-700">
                 {result.engine === 'Java21-RepairLoopCore'
-                  ? 'Java 21 HTTP Service (localhost:8080)'
-                  : 'Browser TypeScript Engine (mirrors RepairDecisionEngine.java)'}
+                  ? 'FixFlip Java 21 Engine (RepairDecisionEngine.java)'
+                  : 'FixFlip Local Browser Engine (mirrors RepairDecisionEngine.java)'}
               </span>
             </p>
             <p className="mt-0.5 text-xs text-slate-500">
               {bridgeStatus ||
-                'In cloud preview, calculations run locally in the browser. Run RepairLoopHttpServer locally to connect via HTTP.'}
+                'Auto-connects to the local FixFlip Java 21 HTTP service when available, with seamless browser fallback.'}
             </p>
           </div>
         </div>
@@ -146,7 +165,7 @@ export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
                 : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
             }`}
           >
-            {useJavaBridge ? 'Java HTTP Bridge: On' : 'Try Java HTTP Bridge'}
+            {useJavaBridge ? 'Java HTTP Bridge: On' : 'Java HTTP Bridge: Off'}
           </button>
           <button
             type="button"
@@ -388,8 +407,23 @@ export function DecisionEngineView({ requests = [] }: DecisionEngineViewProps) {
           </div>
 
           {/* Explanation & Disclaimer */}
-          <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
             <p className="text-sm text-slate-700 leading-relaxed">{result.explanation}</p>
+            {result.recommendation === 'REPLACE' && onSellDevice && (
+              <div className="pt-1 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs font-medium text-slate-600">
+                  Prefer to recover residual value instead of repairing?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onSellDevice(selectedRequest)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#0F1E36] rounded-lg hover:bg-slate-800 transition-colors"
+                >
+                  <span>Sell Device on FixFlip Resale</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
             <p className="flex items-start gap-2 text-xs text-slate-500">
               <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <span>

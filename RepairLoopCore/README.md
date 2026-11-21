@@ -1,6 +1,6 @@
 # RepairLoopCore (Java 21 Core Business Logic Module)
 
-`RepairLoopCore` is a pure, framework-free **Java 21** object-oriented module containing the core domain models, decision scoring logic, quotation manager, repair workflow state machine, and vendor offer manager for **RepairLoop**.
+`RepairLoopCore` is a pure, framework-free **Java 21** object-oriented module containing the core domain models, decision scoring logic, quotation manager, repair workflow state machine, and vendor offer manager for **FixFlip**.
 
 No Spring Boot, Maven, or external third-party JARs are required.
 
@@ -69,4 +69,4 @@ Endpoints exposed:
 - `GET http://localhost:8080/api/health`
 - `POST http://localhost:8080/api/decision/evaluate`
 
-In the RepairLoop web application's **Decision Engine** tab, you can switch between the **Local Browser Engine** (always available in cloud preview) and the **Java 21 HTTP Bridge (`http://localhost:8080`)** when running `RepairLoopHttpServer` locally.
+In the FixFlip web application's **Decision Engine** tab, the frontend automatically connects to the **Java 21 HTTP Bridge (`http://localhost:8080`)** when running `RepairLoopHttpServer` locally, and falls back to the **Local Browser Engine** when offline or in cloud preview.

@@ -325,7 +325,7 @@
     },
     "ResaleListing": {
       "title": "ResaleListing",
-      "description": "Customer product listing in the RepairLoop resale marketplace.",
+      "description": "Customer product listing in the FixFlip resale marketplace.",
       "type": "object",
       "properties": {
         "listingCode": {
@@ -412,6 +412,10 @@
         "soldAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "transactionStatus": {
+          "type": "string",
+          "enum": ["CONFIRMED", "PICKUP_SCHEDULED", "COMPLETED"]
         },
         "createdAt": {
           "type": "string",

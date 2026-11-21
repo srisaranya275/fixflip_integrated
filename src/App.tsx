@@ -13,6 +13,7 @@ import {
   Scale,
   ShieldCheck,
   ShoppingBag,
+  User as UserIcon,
   Wrench,
   X,
 } from 'lucide-react';
@@ -39,6 +40,7 @@ import {
   subscribeVendorOffers,
   subscribeVendorPurchasedListings,
   subscribeWarranties,
+  updateUserProfile,
 } from './services/repairLoopService';
 import {
   AppNotification,
@@ -83,7 +85,7 @@ const VENDOR_NAV: NavItem[] = [
   { id: 'purchased', label: 'Purchased Items', icon: ShoppingBag },
 ];
 
-function RepairLoopShell() {
+function FixFlipShell() {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -94,6 +96,12 @@ function RepairLoopShell() {
   const [activeTab, setActiveTab] = useState<AnyTab>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileNameDraft, setProfileNameDraft] = useState('');
+  const [profileLocationDraft, setProfileLocationDraft] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   // Real-time role-scoped collections
   const [dataLoading, setDataLoading] = useState(true);
@@ -120,7 +128,9 @@ function RepairLoopShell() {
     try {
       let existing = await getUserProfile(user.uid);
       if (!existing && user.emailVerified) {
-        const pendingRaw = localStorage.getItem('repairloop_pending_profile');
+        const pendingRaw =
+          localStorage.getItem('fixflip_pending_profile') ||
+          localStorage.getItem('repairloop_pending_profile');
         let pending: { fullName?: string; role?: UserRole; location?: string } = {};
         if (pendingRaw) {
           try {
@@ -128,11 +138,12 @@ function RepairLoopShell() {
           } catch {
             pending = {};
           }
+          localStorage.removeItem('fixflip_pending_profile');
           localStorage.removeItem('repairloop_pending_profile');
         }
         existing = await createUserProfile({
           uid: user.uid,
-          fullName: pending.fullName || user.displayName || 'RepairLoop Member',
+          fullName: pending.fullName || user.displayName || 'FixFlip Member',
           email: user.email || '',
           role: pending.role || 'CUSTOMER',
           location: pending.location,
@@ -220,7 +231,37 @@ function RepairLoopShell() {
   const handleSignOut = async () => {
     await signOut(auth);
     setProfile(null);
+    setProfileOpen(false);
     setActiveTab('overview');
+  };
+
+  const openProfileModal = () => {
+    if (!profile) return;
+    setProfileNameDraft(profile.fullName);
+    setProfileLocationDraft(profile.location || '');
+    setProfileError(null);
+    setProfileFeedback(null);
+    setProfileOpen(true);
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile) return;
+    setProfileError(null);
+    setProfileFeedback(null);
+    setProfileSaving(true);
+    try {
+      const updated = await updateUserProfile(profile.uid, {
+        fullName: profileNameDraft,
+        location: profileLocationDraft,
+      });
+      setProfile(updated);
+      setProfileFeedback('Profile updated.');
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : 'Failed to update profile.');
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   if (!authReady || profileLoading) {
@@ -302,7 +343,7 @@ function RepairLoopShell() {
         <div>
           <div className="h-16 px-6 flex items-center justify-between border-b border-slate-800">
             <div>
-              <span className="text-lg font-bold tracking-tight text-white">RepairLoop</span>
+              <span className="text-lg font-bold tracking-tight text-white">FixFlip</span>
               <span className="block text-[11px] text-teal-300">Repair. Reuse. Renew.</span>
             </div>
             <button
@@ -342,12 +383,19 @@ function RepairLoopShell() {
         </div>
 
         <div className="p-4 border-t border-slate-800 space-y-3">
-          <div className="px-3 py-2 bg-slate-900/60 rounded-lg">
-            <p className="text-xs font-semibold text-white truncate">{profile.fullName}</p>
+          <button
+            type="button"
+            onClick={openProfileModal}
+            className="w-full text-left px-3 py-2 bg-slate-900/60 hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-white truncate">{profile.fullName}</p>
+              <UserIcon className="w-3.5 h-3.5 text-teal-300 shrink-0" />
+            </div>
             <p className="text-[11px] text-teal-300 font-medium">
-              {profile.role.charAt(0) + profile.role.slice(1).toLowerCase()} Workspace
+              {profile.role.charAt(0) + profile.role.slice(1).toLowerCase()} Workspace · Edit Profile
             </p>
-          </div>
+          </button>
           <button
             type="button"
             onClick={() => void handleSignOut()}
@@ -434,10 +482,14 @@ function RepairLoopShell() {
               )}
             </div>
 
-            <div className="hidden sm:block text-right">
+            <button
+              type="button"
+              onClick={openProfileModal}
+              className="hidden sm:block text-right hover:opacity-80 transition-opacity"
+            >
               <p className="text-xs font-semibold text-slate-900">{profile.fullName}</p>
               <p className="text-[11px] text-slate-500">{profile.email}</p>
-            </div>
+            </button>
           </div>
         </header>
 
@@ -493,6 +545,102 @@ function RepairLoopShell() {
           )}
         </main>
       </div>
+
+      {profileOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handleSaveProfile}
+            className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 shadow-lg space-y-4"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-lg font-bold text-[#0F1E36]">Account Profile</h3>
+                <p className="text-xs text-slate-500">
+                  {profile.role.charAt(0) + profile.role.slice(1).toLowerCase()} account in FixFlip
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProfileOpen(false)}
+                className="text-slate-400 hover:text-slate-700"
+                aria-label="Close profile"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {profileError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800">
+                {profileError}
+              </div>
+            )}
+            {profileFeedback && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900">
+                {profileFeedback}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  minLength={2}
+                  maxLength={80}
+                  value={profileNameDraft}
+                  onChange={(e) => setProfileNameDraft(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  City / Region
+                </label>
+                <input
+                  type="text"
+                  maxLength={120}
+                  value={profileLocationDraft}
+                  onChange={(e) => setProfileLocationDraft(e.target.value)}
+                  placeholder="e.g. Seattle, WA"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                  <p className="text-[11px] text-slate-500">Email</p>
+                  <p className="text-xs font-medium text-slate-800 truncate">{profile.email}</p>
+                </div>
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                  <p className="text-[11px] text-slate-500">Assigned Role</p>
+                  <p className="text-xs font-semibold text-[#0F1E36]">{profile.role}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setProfileOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
+              >
+                Close
+              </button>
+              <button
+                type="submit"
+                disabled={profileSaving}
+                className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
+              >
+                {profileSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -500,7 +648,7 @@ function RepairLoopShell() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <RepairLoopShell />
+      <FixFlipShell />
     </ErrorBoundary>
   );
 }

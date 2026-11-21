@@ -19,6 +19,7 @@ import { formatFirebaseAuthError } from '../firebase/authErrors';
 import { auth } from '../firebase/config';
 import { createUserProfile, getUserProfile } from '../services/repairLoopService';
 import { UserProfile, UserRole } from '../types/domain';
+import { resolveAssetUrl } from '../utils/warranty';
 import { ErrorBanner } from './ui/CommonUI';
 
 interface LandingAuthPageProps {
@@ -72,7 +73,7 @@ export function LandingAuthPage({
     setLoading(true);
     try {
       localStorage.setItem(
-        'repairloop_pending_profile',
+        'fixflip_pending_profile',
         JSON.stringify({ fullName: fullName.trim(), role, location: location.trim() })
       );
       const provider = new GoogleAuthProvider();
@@ -83,16 +84,16 @@ export function LandingAuthPage({
       if (!profile) {
         profile = await createUserProfile({
           uid: user.uid,
-          fullName: fullName.trim() || user.displayName || 'RepairLoop User',
+          fullName: fullName.trim() || user.displayName || 'FixFlip User',
           email: user.email || '',
           role,
           location: location.trim(),
         });
       }
-      localStorage.removeItem('repairloop_pending_profile');
+      localStorage.removeItem('fixflip_pending_profile');
       onAuthenticated(profile);
     } catch (err) {
-      localStorage.removeItem('repairloop_pending_profile');
+      localStorage.removeItem('fixflip_pending_profile');
       setErrorMsg(formatFirebaseAuthError(err));
     } finally {
       setLoading(false);
@@ -141,7 +142,7 @@ export function LandingAuthPage({
     try {
       if (authMode === 'register') {
         localStorage.setItem(
-          'repairloop_pending_profile',
+          'fixflip_pending_profile',
           JSON.stringify({ fullName: fullName.trim(), role, location: location.trim() })
         );
         const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
@@ -157,7 +158,7 @@ export function LandingAuthPage({
               location: location.trim(),
             });
           }
-          localStorage.removeItem('repairloop_pending_profile');
+          localStorage.removeItem('fixflip_pending_profile');
           onAuthenticated(profile);
         } else {
           await sendEmailVerification(cred.user);
@@ -167,7 +168,7 @@ export function LandingAuthPage({
         }
       } else {
         localStorage.setItem(
-          'repairloop_pending_profile',
+          'fixflip_pending_profile',
           JSON.stringify({ fullName: fullName.trim(), role, location: location.trim() })
         );
         const cred = await signInWithEmailAndPassword(auth, trimmedEmail, password);
@@ -181,13 +182,13 @@ export function LandingAuthPage({
         if (!profile) {
           profile = await createUserProfile({
             uid: cred.user.uid,
-            fullName: cred.user.displayName || 'RepairLoop Member',
+            fullName: cred.user.displayName || 'FixFlip Member',
             email: cred.user.email || trimmedEmail,
             role,
             location: location.trim(),
           });
         }
-        localStorage.removeItem('repairloop_pending_profile');
+        localStorage.removeItem('fixflip_pending_profile');
         onAuthenticated(profile);
       }
     } catch (err: unknown) {
@@ -206,7 +207,7 @@ export function LandingAuthPage({
             href="#top"
             className="text-xl font-bold tracking-tight text-[#0F1E36] whitespace-nowrap shrink-0"
           >
-            RepairLoop
+            FixFlip
           </a>
 
           <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600">
@@ -246,7 +247,7 @@ export function LandingAuthPage({
                 Smarter lifecycle decisions for electronics and appliances.
               </h1>
               <p className="mt-4 text-base text-slate-600 max-w-2xl leading-relaxed">
-                RepairLoop connects device owners, certified repair mechanics, and verified resale
+                FixFlip connects device owners, certified repair mechanics, and verified resale
                 vendors in one transparent workflow. Compare repair quotes, track warranties,
                 resell end-of-life hardware, and weigh repair vs. replacement with quantitative
                 clarity.
@@ -255,7 +256,7 @@ export function LandingAuthPage({
 
             <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-900 aspect-[16/9]">
               <img
-                src="/src/assets/images/repairloop_hero_workbench_1795228565033.jpg"
+                src={resolveAssetUrl('/src/assets/images/repairloop_hero_workbench_1795228565033.jpg')}
                 alt="Precision electronics diagnostics and repair studio workbench"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"
@@ -325,7 +326,7 @@ export function LandingAuthPage({
                   <div className="flex items-center justify-between gap-4 pb-5 border-b border-slate-200">
                     <div>
                       <h2 className="text-xl font-bold text-[#0F1E36]">
-                        {authMode === 'register' ? 'Create RepairLoop Account' : 'Sign In to RepairLoop'}
+                        {authMode === 'register' ? 'Create FixFlip Account' : 'Sign In to FixFlip'}
                       </h2>
                       <p className="mt-1 text-xs text-slate-500">
                         Select your role and authenticate to enter your workspace.
@@ -573,7 +574,7 @@ export function LandingAuthPage({
 
       <footer className="mt-16 border-t border-slate-200 bg-white">
         <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <span>RepairLoop — Repair. Reuse. Renew.</span>
+          <span>FixFlip — Repair. Reuse. Renew.</span>
           <div className="flex items-center gap-4">
             <span className="inline-flex items-center gap-1">
               <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />

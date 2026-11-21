@@ -93,3 +93,22 @@ export function generateShortCode(prefix: string): string {
   const rand = Math.floor(1000 + Math.random() * 9000);
   return `${prefix}-${year}-${rand}`;
 }
+
+/**
+ * Normalizes static local asset URLs against Vite's configured BASE_URL
+ * so preset images work both in local dev ("/") and on GitHub Pages ("/fixflip_integrated/").
+ */
+export function resolveAssetUrl(url?: string): string {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  const base = import.meta.env.BASE_URL || '/';
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+  const assetsMarker = 'src/assets/';
+  const markerIdx = url.indexOf(assetsMarker);
+  if (markerIdx !== -1) {
+    return `${normalizedBase}${url.slice(markerIdx)}`;
+  }
+  return url;
+}
