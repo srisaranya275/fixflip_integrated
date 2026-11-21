@@ -1,0 +1,518 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Primitive Helpers
+    // -------------------------------------------------------------------------
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isNonEmptyString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function hasProfile() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isCustomerRole() {
+      return hasProfile() && getUserRole() == 'CUSTOMER';
+    }
+
+    function isMechanicRole() {
+      return hasProfile() && getUserRole() == 'MECHANIC';
+    }
+
+    function isVendorRole() {
+      return hasProfile() && getUserRole() == 'VENDOR';
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // -------------------------------------------------------------------------
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'fullName', 'email', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'fullName', 'email', 'role', 'location', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && isNonEmptyString(data.fullName, 2, 80)
+        && isNonEmptyString(data.email, 5, 120)
+        && data.role in ['CUSTOMER', 'MECHANIC', 'VENDOR']
+        && (!('location' in data) || (data.location is string && data.location.size() <= 120))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRepairRequest(data) {
+      return data.keys().hasAll([
+          'requestCode', 'customerId', 'customerName', 'category', 'productName',
+          'brand', 'modelNumber', 'productAgeYears', 'purchaseDate',
+          'originalPrice', 'replacementPrice', 'previousRepairCount',
+          'previousRepairCost', 'recurringFault', 'problemDescription',
+          'location', 'status', 'quotationCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'requestCode', 'customerId', 'customerName', 'category', 'productName',
+          'brand', 'modelNumber', 'productAgeYears', 'purchaseDate',
+          'originalPrice', 'replacementPrice', 'previousRepairCount',
+          'previousRepairCost', 'recurringFault', 'problemDescription',
+          'location', 'imageUrl', 'status', 'quotationCount',
+          'acceptedQuotationId', 'acceptedMechanicId', 'acceptedMechanicName',
+          'acceptedQuoteCost', 'createdAt', 'updatedAt'
+        ])
+        && isNonEmptyString(data.requestCode, 4, 32)
+        && isValidId(data.customerId)
+        && isNonEmptyString(data.customerName, 2, 80)
+        && isNonEmptyString(data.category, 2, 60)
+        && isNonEmptyString(data.productName, 2, 100)
+        && isNonEmptyString(data.brand, 1, 60)
+        && isNonEmptyString(data.modelNumber, 1, 60)
+        && data.productAgeYears is number && data.productAgeYears >= 0 && data.productAgeYears <= 50
+        && isNonEmptyString(data.purchaseDate, 10, 10)
+        && data.originalPrice is number && data.originalPrice > 0 && data.originalPrice <= 1000000
+        && data.replacementPrice is number && data.replacementPrice > 0 && data.replacementPrice <= 1000000
+        && data.previousRepairCount is number && data.previousRepairCount >= 0 && data.previousRepairCount <= 100
+        && data.previousRepairCost is number && data.previousRepairCost >= 0 && data.previousRepairCost <= 1000000
+        && data.recurringFault is bool
+        && isNonEmptyString(data.problemDescription, 10, 1500)
+        && isNonEmptyString(data.location, 2, 120)
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 250000))
+        && data.status in [
+          'PENDING', 'QUOTATION_RECEIVED', 'QUOTATION_ACCEPTED',
+          'REPAIR_IN_PROGRESS', 'REPAIR_COMPLETED', 'CANCELLED'
+        ]
+        && data.quotationCount is number && data.quotationCount >= 0 && data.quotationCount <= 500
+        && (!('acceptedQuotationId' in data) || data.acceptedQuotationId == null || isValidId(data.acceptedQuotationId))
+        && (!('acceptedMechanicId' in data) || data.acceptedMechanicId == null || isValidId(data.acceptedMechanicId))
+        && (!('acceptedMechanicName' in data) || data.acceptedMechanicName == null || isNonEmptyString(data.acceptedMechanicName, 2, 80))
+        && (!('acceptedQuoteCost' in data) || data.acceptedQuoteCost == null || (data.acceptedQuoteCost is number && data.acceptedQuoteCost > 0 && data.acceptedQuoteCost <= 1000000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidQuotation(data) {
+      return data.keys().hasAll([
+          'requestId', 'requestCode', 'productName', 'customerId',
+          'mechanicId', 'mechanicName', 'estimatedCost', 'spareParts',
+          'completionTimeDays', 'additionalLifespanYears', 'repairDescription',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'requestId', 'requestCode', 'productName', 'customerId',
+          'mechanicId', 'mechanicName', 'estimatedCost', 'spareParts',
+          'completionTimeDays', 'additionalLifespanYears', 'repairDescription',
+          'notes', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.requestId)
+        && isNonEmptyString(data.requestCode, 4, 32)
+        && isNonEmptyString(data.productName, 2, 100)
+        && isValidId(data.customerId)
+        && isValidId(data.mechanicId)
+        && isNonEmptyString(data.mechanicName, 2, 80)
+        && data.estimatedCost is number && data.estimatedCost > 0 && data.estimatedCost <= 1000000
+        && isNonEmptyString(data.spareParts, 2, 300)
+        && data.completionTimeDays is number && data.completionTimeDays >= 1 && data.completionTimeDays <= 365
+        && data.additionalLifespanYears is number && data.additionalLifespanYears >= 0.5 && data.additionalLifespanYears <= 30
+        && isNonEmptyString(data.repairDescription, 5, 1000)
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 600))
+        && data.status in ['PENDING', 'ACCEPTED', 'REJECTED']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWarranty(data) {
+      return data.keys().hasAll([
+          'ownerId', 'productName', 'brand', 'serialOrImei',
+          'purchaseDate', 'warrantyDurationMonths', 'purchasePrice',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'productName', 'brand', 'serialOrImei',
+          'purchaseDate', 'warrantyDurationMonths', 'purchasePrice',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && isNonEmptyString(data.productName, 2, 100)
+        && isNonEmptyString(data.brand, 1, 60)
+        && isNonEmptyString(data.serialOrImei, 3, 80)
+        && isNonEmptyString(data.purchaseDate, 10, 10)
+        && data.warrantyDurationMonths is number && data.warrantyDurationMonths >= 1 && data.warrantyDurationMonths <= 240
+        && data.purchasePrice is number && data.purchasePrice > 0 && data.purchasePrice <= 1000000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidResaleListing(data) {
+      return data.keys().hasAll([
+          'listingCode', 'sellerId', 'sellerName', 'productName', 'category',
+          'brand', 'model', 'ageYears', 'condition', 'expectedPrice',
+          'location', 'description', 'status', 'offerCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'listingCode', 'sellerId', 'sellerName', 'productName', 'category',
+          'brand', 'model', 'ageYears', 'condition', 'expectedPrice',
+          'location', 'description', 'imageUrl', 'status', 'offerCount',
+          'acceptedOfferId', 'buyerVendorId', 'buyerVendorName',
+          'soldPrice', 'soldAt', 'createdAt', 'updatedAt'
+        ])
+        && isNonEmptyString(data.listingCode, 4, 32)
+        && isValidId(data.sellerId)
+        && isNonEmptyString(data.sellerName, 2, 80)
+        && isNonEmptyString(data.productName, 2, 100)
+        && isNonEmptyString(data.category, 2, 60)
+        && isNonEmptyString(data.brand, 1, 60)
+        && isNonEmptyString(data.model, 1, 60)
+        && data.ageYears is number && data.ageYears >= 0 && data.ageYears <= 50
+        && data.condition in ['LIKE_NEW', 'GOOD', 'FAIR', 'FOR_PARTS']
+        && data.expectedPrice is number && data.expectedPrice > 0 && data.expectedPrice <= 1000000
+        && isNonEmptyString(data.location, 2, 120)
+        && isNonEmptyString(data.description, 10, 1500)
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 250000))
+        && data.status in ['AVAILABLE', 'OFFER_RECEIVED', 'SOLD']
+        && data.offerCount is number && data.offerCount >= 0 && data.offerCount <= 500
+        && (!('acceptedOfferId' in data) || data.acceptedOfferId == null || isValidId(data.acceptedOfferId))
+        && (!('buyerVendorId' in data) || data.buyerVendorId == null || isValidId(data.buyerVendorId))
+        && (!('buyerVendorName' in data) || data.buyerVendorName == null || isNonEmptyString(data.buyerVendorName, 2, 80))
+        && (!('soldPrice' in data) || data.soldPrice == null || (data.soldPrice is number && data.soldPrice > 0 && data.soldPrice <= 1000000))
+        && (!('soldAt' in data) || data.soldAt == null || data.soldAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidVendorOffer(data) {
+      return data.keys().hasAll([
+          'listingId', 'listingCode', 'productName', 'sellerId',
+          'vendorId', 'vendorName', 'offeredPrice', 'message',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'listingId', 'listingCode', 'productName', 'sellerId',
+          'vendorId', 'vendorName', 'offeredPrice', 'message',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.listingId)
+        && isNonEmptyString(data.listingCode, 4, 32)
+        && isNonEmptyString(data.productName, 2, 100)
+        && isValidId(data.sellerId)
+        && isValidId(data.vendorId)
+        && isNonEmptyString(data.vendorName, 2, 80)
+        && data.offeredPrice is number && data.offeredPrice > 0 && data.offeredPrice <= 1000000
+        && isNonEmptyString(data.message, 2, 600)
+        && data.status in ['PENDING', 'ACCEPTED', 'REJECTED']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll([
+          'recipientId', 'title', 'message', 'relatedType', 'relatedId', 'read', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'recipientId', 'title', 'message', 'relatedType', 'relatedId', 'read', 'createdAt'
+        ])
+        && isValidId(data.recipientId)
+        && isNonEmptyString(data.title, 2, 120)
+        && isNonEmptyString(data.message, 2, 300)
+        && data.relatedType in ['REPAIR_REQUEST', 'QUOTATION', 'RESALE_LISTING', 'VENDOR_OFFER']
+        && isValidId(data.relatedId)
+        && data.read is bool
+        && data.createdAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isVerified()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().role == existing().role
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'location', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /repairRequests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (
+        existing().customerId == request.auth.uid
+        || existing().status in ['PENDING', 'QUOTATION_RECEIVED']
+        || existing().acceptedMechanicId == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid
+        || resource.data.status in ['PENDING', 'QUOTATION_RECEIVED']
+        || resource.data.acceptedMechanicId == request.auth.uid
+      );
+      allow create: if isVerified()
+        && isValidId(requestId)
+        && isValidRepairRequest(incoming())
+        && isCustomerRole()
+        && incoming().customerId == request.auth.uid
+        && incoming().status == 'PENDING'
+        && incoming().quotationCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified()
+        && isValidId(requestId)
+        && isValidRepairRequest(incoming())
+        && existing().status != 'REPAIR_COMPLETED'
+        && existing().status != 'CANCELLED'
+        && incoming().requestCode == existing().requestCode
+        && incoming().customerId == existing().customerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Mechanic submits a quotation
+          (
+            isMechanicRole()
+            && existing().status in ['PENDING', 'QUOTATION_RECEIVED']
+            && incoming().status == 'QUOTATION_RECEIVED'
+            && incoming().quotationCount == existing().quotationCount + 1
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'quotationCount', 'updatedAt'])
+          )
+          // Action 2: Customer accepts one quotation
+          || (
+            existing().customerId == request.auth.uid
+            && existing().status in ['PENDING', 'QUOTATION_RECEIVED']
+            && incoming().status == 'QUOTATION_ACCEPTED'
+            && incoming().acceptedQuotationId is string
+            && incoming().acceptedMechanicId is string
+            && incoming().acceptedMechanicName is string
+            && incoming().acceptedQuoteCost is number
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'acceptedQuotationId', 'acceptedMechanicId',
+              'acceptedMechanicName', 'acceptedQuoteCost', 'updatedAt'
+            ])
+          )
+          // Action 3: Assigned mechanic advances repair progress
+          || (
+            isMechanicRole()
+            && existing().acceptedMechanicId == request.auth.uid
+            && (
+              (existing().status == 'QUOTATION_ACCEPTED' && incoming().status == 'REPAIR_IN_PROGRESS')
+              || (existing().status == 'REPAIR_IN_PROGRESS' && incoming().status == 'REPAIR_COMPLETED')
+            )
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+          // Action 4: Customer cancels open request
+          || (
+            existing().customerId == request.auth.uid
+            && existing().status in ['PENDING', 'QUOTATION_RECEIVED']
+            && incoming().status == 'CANCELLED'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /quotations/{quotationId} {
+      allow get: if isSignedIn() && isValidId(quotationId) && (
+        existing().mechanicId == request.auth.uid
+        || existing().customerId == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        resource.data.mechanicId == request.auth.uid
+        || resource.data.customerId == request.auth.uid
+      );
+      allow create: if isVerified()
+        && isValidId(quotationId)
+        && isValidQuotation(incoming())
+        && isMechanicRole()
+        && incoming().mechanicId == request.auth.uid
+        && incoming().status == 'PENDING'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/repairRequests/$(incoming().requestId))
+        && get(/databases/$(database)/documents/repairRequests/$(incoming().requestId)).data.customerId == incoming().customerId
+        && get(/databases/$(database)/documents/repairRequests/$(incoming().requestId)).data.status in ['PENDING', 'QUOTATION_RECEIVED'];
+      allow update: if isVerified()
+        && isValidId(quotationId)
+        && isValidQuotation(incoming())
+        && existing().status == 'PENDING'
+        && existing().customerId == request.auth.uid
+        && incoming().requestId == existing().requestId
+        && incoming().customerId == existing().customerId
+        && incoming().mechanicId == existing().mechanicId
+        && incoming().createdAt == existing().createdAt
+        && incoming().status in ['ACCEPTED', 'REJECTED']
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /warranties/{warrantyId} {
+      allow get: if isSignedIn() && isValidId(warrantyId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerified()
+        && isValidId(warrantyId)
+        && isValidWarranty(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified()
+        && isValidId(warrantyId)
+        && isValidWarranty(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'productName', 'brand', 'serialOrImei', 'purchaseDate',
+          'warrantyDurationMonths', 'purchasePrice', 'updatedAt'
+        ]);
+      allow delete: if isVerified() && isValidId(warrantyId) && existing().ownerId == request.auth.uid;
+    }
+
+    match /resaleListings/{listingId} {
+      allow get: if isSignedIn() && isValidId(listingId) && (
+        existing().sellerId == request.auth.uid
+        || existing().status in ['AVAILABLE', 'OFFER_RECEIVED']
+        || existing().buyerVendorId == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        resource.data.sellerId == request.auth.uid
+        || resource.data.status in ['AVAILABLE', 'OFFER_RECEIVED']
+        || resource.data.buyerVendorId == request.auth.uid
+      );
+      allow create: if isVerified()
+        && isValidId(listingId)
+        && isValidResaleListing(incoming())
+        && isCustomerRole()
+        && incoming().sellerId == request.auth.uid
+        && incoming().status == 'AVAILABLE'
+        && incoming().offerCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified()
+        && isValidId(listingId)
+        && isValidResaleListing(incoming())
+        && existing().status != 'SOLD'
+        && incoming().listingCode == existing().listingCode
+        && incoming().sellerId == existing().sellerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Vendor submits offer
+          (
+            isVendorRole()
+            && existing().status in ['AVAILABLE', 'OFFER_RECEIVED']
+            && incoming().status == 'OFFER_RECEIVED'
+            && incoming().offerCount == existing().offerCount + 1
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'offerCount', 'updatedAt'])
+          )
+          // Action 2: Seller accepts one vendor offer -> marks SOLD
+          || (
+            existing().sellerId == request.auth.uid
+            && existing().status in ['AVAILABLE', 'OFFER_RECEIVED']
+            && incoming().status == 'SOLD'
+            && incoming().acceptedOfferId is string
+            && incoming().buyerVendorId is string
+            && incoming().buyerVendorName is string
+            && incoming().soldPrice is number
+            && incoming().soldAt == request.time
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'acceptedOfferId', 'buyerVendorId',
+              'buyerVendorName', 'soldPrice', 'soldAt', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /vendorOffers/{offerId} {
+      allow get: if isSignedIn() && isValidId(offerId) && (
+        existing().vendorId == request.auth.uid
+        || existing().sellerId == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        resource.data.vendorId == request.auth.uid
+        || resource.data.sellerId == request.auth.uid
+      );
+      allow create: if isVerified()
+        && isValidId(offerId)
+        && isValidVendorOffer(incoming())
+        && isVendorRole()
+        && incoming().vendorId == request.auth.uid
+        && incoming().status == 'PENDING'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/resaleListings/$(incoming().listingId))
+        && get(/databases/$(database)/documents/resaleListings/$(incoming().listingId)).data.sellerId == incoming().sellerId
+        && get(/databases/$(database)/documents/resaleListings/$(incoming().listingId)).data.status in ['AVAILABLE', 'OFFER_RECEIVED'];
+      allow update: if isVerified()
+        && isValidId(offerId)
+        && isValidVendorOffer(incoming())
+        && existing().status == 'PENDING'
+        && existing().sellerId == request.auth.uid
+        && incoming().listingId == existing().listingId
+        && incoming().sellerId == existing().sellerId
+        && incoming().vendorId == existing().vendorId
+        && incoming().createdAt == existing().createdAt
+        && incoming().status in ['ACCEPTED', 'REJECTED']
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId) && existing().recipientId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+      allow create: if isVerified()
+        && isValidId(notificationId)
+        && isValidNotification(incoming())
+        && incoming().read == false
+        && incoming().createdAt == request.time;
+      allow update: if isVerified()
+        && isValidId(notificationId)
+        && isValidNotification(incoming())
+        && existing().recipientId == request.auth.uid
+        && incoming().recipientId == existing().recipientId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if false;
+    }
+  }
+}
